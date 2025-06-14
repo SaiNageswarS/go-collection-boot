@@ -1,69 +1,73 @@
 package linq
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestWhere(t *testing.T) {
+func TestQuery_Chaining_SelectWhere_ToSlice(t *testing.T) {
 	data := []int{1, 2, 3, 4, 5}
-	result := Where(data, func(n int) bool { return n%2 == 0 })
 
-	assert.Equal(t, []int{2, 4}, result)
+	got := From(data).
+		Where(func(n int) bool { return n%2 == 1 }). // keep odds
+		Select(func(n int) int { return n * n }).    // square each
+		ToSlice()
+
+	want := []int{1, 9, 25}
+	assert.Equal(t, want, got, "where→select chain should filter and transform correctly")
 }
 
-func TestSelect(t *testing.T) {
-	data := []string{"a", "bb", "ccc"}
-	result := Select(data, func(s string) int { return len(s) })
+func TestQuery_Any_All_Count_First(t *testing.T) {
+	q := From([]int{1, 2, 3, 4})
 
-	assert.Equal(t, []int{1, 2, 3}, result)
-}
+	assert.True(t, q.Any(func(n int) bool { return n > 3 }))
+	assert.False(t, q.Any(func(n int) bool { return n > 10 }))
 
-func TestAny(t *testing.T) {
-	data := []int{1, 3, 5}
-	assert.False(t, Any(data, func(n int) bool { return n%2 == 0 }))
-	assert.True(t, Any(data, func(n int) bool { return n == 3 }))
-}
+	assert.True(t, q.All(func(n int) bool { return n < 5 }))
+	assert.False(t, q.All(func(n int) bool { return n%2 == 0 }))
 
-func TestAll(t *testing.T) {
-	data := []int{2, 4, 6}
-	assert.True(t, All(data, func(n int) bool { return n%2 == 0 }))
-	assert.False(t, All(data, func(n int) bool { return n > 2 }))
-}
+	assert.Equal(t, 2, q.Count(func(n int) bool { return n%2 == 0 }))
 
-func TestFirst(t *testing.T) {
-	data := []string{"dog", "cat", "cow"}
-	item, ok := First(data, func(s string) bool { return strings.HasPrefix(s, "c") })
-
+	first, ok := q.First(func(n int) bool { return n%2 == 0 })
 	assert.True(t, ok)
-	assert.Equal(t, "cat", item)
+	assert.Equal(t, 2, first)
 
-	_, ok = First(data, func(s string) bool { return s == "elephant" })
+	_, ok = q.First(func(n int) bool { return n > 10 })
 	assert.False(t, ok)
 }
 
-func TestCount(t *testing.T) {
-	data := []int{1, 2, 3, 4, 5, 6}
-	count := Count(data, func(n int) bool { return n%2 == 0 })
+func TestQuery_Distinct_Reverse_Len(t *testing.T) {
+	q := From([]int{1, 2, 2, 3, 3, 3})
 
-	assert.Equal(t, 3, count)
+	distinct := q.Distinct().ToSlice()
+	assert.Equal(t, []int{1, 2, 3}, distinct)
+
+	reversed := q.Reverse().ToSlice()
+	assert.Equal(t, []int{3, 3, 3, 2, 2, 1}, reversed)
+
+	assert.Equal(t, 6, q.Len())
 }
 
-func TestDistinct(t *testing.T) {
-	data := []string{"apple", "banana", "apple", "cherry", "banana"}
-	result := Distinct(data)
+func TestQuery_SetOps(t *testing.T) {
+	a := From([]int{1, 2, 3})
+	b := From([]int{3, 4})
 
-	assert.ElementsMatch(t, []string{"apple", "banana", "cherry"}, result)
+	union := a.Union(b).ToSlice()
+	assert.Equal(t, []int{1, 2, 3, 4}, union, "union keeps order of first query then uniques from second")
+
+	inter := a.Intersection(b).ToSlice()
+	assert.Equal(t, []int{3}, inter)
+
+	diff := a.Difference(b).ToSlice()
+	assert.Equal(t, []int{1, 2}, diff)
 }
 
-func TestReverse(t *testing.T) {
-	data := []int{1, 2, 3}
-	result := Reverse(data)
+func TestQuery_GenericWithStrings(t *testing.T) {
+	q := From([]string{"a", "b", "a", "c"}).
+		Distinct().
+		Reverse().
+		ToSlice()
 
-	assert.Equal(t, []int{3, 2, 1}, result)
-
-	// original should remain unchanged
-	assert.Equal(t, []int{1, 2, 3}, data)
+	assert.Equal(t, []string{"c", "b", "a"}, q, "distinct should remove duplicates")
 }

@@ -1,28 +1,33 @@
 package linq
 
-// Where filters a slice based on a predicate.
-func Where[T any](input []T, predicate func(T) bool) []T {
+type Query[T comparable] struct {
+	items []T
+}
+
+func From[T comparable](items []T) Query[T] {
+	return Query[T]{items: items}
+}
+
+func (q Query[T]) Where(predicate func(T) bool) Query[T] {
 	var result []T
-	for _, item := range input {
+	for _, item := range q.items {
 		if predicate(item) {
 			result = append(result, item)
 		}
 	}
-	return result
+	return Query[T]{items: result}
 }
 
-// Select maps each item in a slice to a new form.
-func Select[T any, R any](input []T, mapper func(T) R) []R {
-	result := make([]R, 0, len(input))
-	for _, item := range input {
+func (q Query[T]) Select(mapper func(T) T) Query[T] {
+	var result []T
+	for _, item := range q.items {
 		result = append(result, mapper(item))
 	}
-	return result
+	return Query[T]{items: result}
 }
 
-// Any returns true if any element matches the predicate.
-func Any[T any](input []T, predicate func(T) bool) bool {
-	for _, item := range input {
+func (q Query[T]) Any(predicate func(T) bool) bool {
+	for _, item := range q.items {
 		if predicate(item) {
 			return true
 		}
@@ -30,9 +35,8 @@ func Any[T any](input []T, predicate func(T) bool) bool {
 	return false
 }
 
-// All returns true if all elements match the predicate.
-func All[T any](input []T, predicate func(T) bool) bool {
-	for _, item := range input {
+func (q Query[T]) All(predicate func(T) bool) bool {
+	for _, item := range q.items {
 		if !predicate(item) {
 			return false
 		}
@@ -40,21 +44,19 @@ func All[T any](input []T, predicate func(T) bool) bool {
 	return true
 }
 
-// First returns the first element that matches the predicate.
-func First[T any](input []T, predicate func(T) bool) (T, bool) {
-	for _, item := range input {
+func (q Query[T]) First(predicate func(T) bool) (T, bool) {
+	for _, item := range q.items {
 		if predicate(item) {
 			return item, true
 		}
 	}
-	var zero T
+	var zero T // zero value for type T
 	return zero, false
 }
 
-// Count returns number of elements matching a predicate.
-func Count[T any](input []T, predicate func(T) bool) int {
+func (q Query[T]) Count(predicate func(T) bool) int {
 	count := 0
-	for _, item := range input {
+	for _, item := range q.items {
 		if predicate(item) {
 			count++
 		}
@@ -62,25 +64,89 @@ func Count[T any](input []T, predicate func(T) bool) int {
 	return count
 }
 
-// Distinct returns a slice with duplicate values removed.
-func Distinct[T comparable](input []T) []T {
+func (q Query[T]) Distinct() Query[T] {
 	seen := make(map[T]struct{})
 	var result []T
-	for _, item := range input {
-		if _, ok := seen[item]; !ok {
+	for _, item := range q.items {
+		if _, exists := seen[item]; !exists {
 			seen[item] = struct{}{}
 			result = append(result, item)
 		}
 	}
-	return result
+	return Query[T]{items: result}
 }
 
-// Reverse returns a new slice with the elements reversed.
-func Reverse[T any](input []T) []T {
-	n := len(input)
-	result := make([]T, n)
-	for i := 0; i < n; i++ {
-		result[i] = input[n-1-i]
+func (q Query[T]) Len() int {
+	return len(q.items)
+}
+
+func (q Query[T]) Reverse() Query[T] {
+	var result []T
+	for i := len(q.items) - 1; i >= 0; i-- {
+		result = append(result, q.items[i])
 	}
-	return result
+	return Query[T]{items: result}
+}
+
+// Union combines two queries, returning distinct items from both.
+func (q Query[T]) Union(other Query[T]) Query[T] {
+	seen := make(map[T]struct{})
+	var result []T
+
+	for _, item := range q.items {
+		if _, exists := seen[item]; !exists {
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+
+	for _, item := range other.items {
+		if _, exists := seen[item]; !exists {
+			seen[item] = struct{}{}
+			result = append(result, item)
+		}
+	}
+
+	return Query[T]{items: result}
+}
+
+// Intersection returns items that are present in both queries.
+func (q Query[T]) Intersection(other Query[T]) Query[T] {
+	seen := make(map[T]struct{})
+	var result []T
+
+	for _, item := range q.items {
+		seen[item] = struct{}{}
+	}
+
+	for _, item := range other.items {
+		if _, exists := seen[item]; exists {
+			result = append(result, item)
+		}
+	}
+
+	return Query[T]{items: result}
+}
+
+// Difference returns items that are in the first query but not in the second.
+func (q Query[T]) Difference(other Query[T]) Query[T] {
+	seen := make(map[T]struct{})
+	var result []T
+
+	for _, item := range other.items {
+		seen[item] = struct{}{}
+	}
+
+	for _, item := range q.items {
+		if _, exists := seen[item]; !exists {
+			result = append(result, item)
+		}
+	}
+
+	return Query[T]{items: result}
+}
+
+// ToSlice converts the Query to a slice.
+func (q Query[T]) ToSlice() []T {
+	return q.items
 }
