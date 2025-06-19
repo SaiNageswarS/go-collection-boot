@@ -1,10 +1,10 @@
 package linq
 
-type Query[T comparable] struct {
+type Query[T any] struct {
 	items []T
 }
 
-func From[T comparable](items []T) Query[T] {
+func From[T any](items []T) Query[T] {
 	return Query[T]{items: items}
 }
 
@@ -64,18 +64,6 @@ func (q Query[T]) Count(predicate func(T) bool) int {
 	return count
 }
 
-func (q Query[T]) Distinct() Query[T] {
-	seen := make(map[T]struct{})
-	var result []T
-	for _, item := range q.items {
-		if _, exists := seen[item]; !exists {
-			seen[item] = struct{}{}
-			result = append(result, item)
-		}
-	}
-	return Query[T]{items: result}
-}
-
 func (q Query[T]) Len() int {
 	return len(q.items)
 }
@@ -85,64 +73,6 @@ func (q Query[T]) Reverse() Query[T] {
 	for i := len(q.items) - 1; i >= 0; i-- {
 		result = append(result, q.items[i])
 	}
-	return Query[T]{items: result}
-}
-
-// Union combines two queries, returning distinct items from both.
-func (q Query[T]) Union(other Query[T]) Query[T] {
-	seen := make(map[T]struct{})
-	var result []T
-
-	for _, item := range q.items {
-		if _, exists := seen[item]; !exists {
-			seen[item] = struct{}{}
-			result = append(result, item)
-		}
-	}
-
-	for _, item := range other.items {
-		if _, exists := seen[item]; !exists {
-			seen[item] = struct{}{}
-			result = append(result, item)
-		}
-	}
-
-	return Query[T]{items: result}
-}
-
-// Intersection returns items that are present in both queries.
-func (q Query[T]) Intersection(other Query[T]) Query[T] {
-	seen := make(map[T]struct{})
-	var result []T
-
-	for _, item := range q.items {
-		seen[item] = struct{}{}
-	}
-
-	for _, item := range other.items {
-		if _, exists := seen[item]; exists {
-			result = append(result, item)
-		}
-	}
-
-	return Query[T]{items: result}
-}
-
-// Difference returns items that are in the first query but not in the second.
-func (q Query[T]) Difference(other Query[T]) Query[T] {
-	seen := make(map[T]struct{})
-	var result []T
-
-	for _, item := range other.items {
-		seen[item] = struct{}{}
-	}
-
-	for _, item := range q.items {
-		if _, exists := seen[item]; !exists {
-			result = append(result, item)
-		}
-	}
-
 	return Query[T]{items: result}
 }
 

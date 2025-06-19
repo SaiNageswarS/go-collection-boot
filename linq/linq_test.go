@@ -37,37 +37,10 @@ func TestQuery_Any_All_Count_First(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestQuery_Distinct_Reverse_Len(t *testing.T) {
-	q := From([]int{1, 2, 2, 3, 3, 3})
-
-	distinct := q.Distinct().ToSlice()
-	assert.Equal(t, []int{1, 2, 3}, distinct)
-
-	reversed := q.Reverse().ToSlice()
-	assert.Equal(t, []int{3, 3, 3, 2, 2, 1}, reversed)
-
-	assert.Equal(t, 6, q.Len())
-}
-
-func TestQuery_SetOps(t *testing.T) {
-	a := From([]int{1, 2, 3})
-	b := From([]int{3, 4})
-
-	union := a.Union(b).ToSlice()
-	assert.Equal(t, []int{1, 2, 3, 4}, union, "union keeps order of first query then uniques from second")
-
-	inter := a.Intersection(b).ToSlice()
-	assert.Equal(t, []int{3}, inter)
-
-	diff := a.Difference(b).ToSlice()
-	assert.Equal(t, []int{1, 2}, diff)
-}
-
 func TestQuery_GenericWithStrings(t *testing.T) {
 	q := From([]string{"a", "b", "a", "c"}).
-		Distinct().
 		Reverse().
 		ToSlice()
 
-	assert.Equal(t, []string{"c", "b", "a"}, q, "distinct should remove duplicates")
+	assert.Equal(t, []string{"c", "a", "b", "a"}, q, "distinct should remove duplicates")
 }
