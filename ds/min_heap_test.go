@@ -44,7 +44,7 @@ func TestMinHeap(t *testing.T) {
 	assert.Equal(t, 3, min, "Pop should return the next minimum element")
 
 	expectedRemaining := []int{4, 5, 8, 20}
-	for idx, v := range h.ToSlice() {
+	for idx, v := range h.ToSortedSlice() {
 		assert.Equal(t, expectedRemaining[idx], v, "Remaining elements should be in correct order")
 	}
 }

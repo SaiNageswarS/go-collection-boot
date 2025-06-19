@@ -47,8 +47,13 @@ func (h *MinHeap[T]) IsEmpty() bool {
 	return len(h.data) == 0
 }
 
-func (h *MinHeap[T]) ToSlice() []T {
-	return append([]T(nil), h.data...) // return a copy of the data slice
+func (h *MinHeap[T]) ToSortedSlice() []T {
+	out := make([]T, 0, len(h.data))
+	for !h.IsEmpty() {
+		value, _ := h.Pop()
+		out = append(out, value)
+	}
+	return out
 }
 
 func (h *MinHeap[T]) up(idx int) {
