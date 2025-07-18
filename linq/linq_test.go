@@ -19,22 +19,25 @@ func TestQuery_Chaining_SelectWhere_ToSlice(t *testing.T) {
 }
 
 func TestQuery_Any_All_Count_First(t *testing.T) {
-	q := From([]int{1, 2, 3, 4})
+	q := []int{1, 2, 3, 4}
 
-	assert.True(t, q.Any(func(n int) bool { return n > 3 }))
-	assert.False(t, q.Any(func(n int) bool { return n > 10 }))
+	assert.True(t, From(q).Any(func(n int) bool { return n > 3 }))
+	assert.False(t, From(q).Any(func(n int) bool { return n > 10 }))
 
-	assert.True(t, q.All(func(n int) bool { return n < 5 }))
-	assert.False(t, q.All(func(n int) bool { return n%2 == 0 }))
+	assert.True(t, From(q).All(func(n int) bool { return n < 5 }))
+	assert.False(t, From(q).All(func(n int) bool { return n%2 == 0 }))
 
-	assert.Equal(t, 2, q.Count(func(n int) bool { return n%2 == 0 }))
+	assert.Equal(t, 2, From(q).Count(func(n int) bool { return n%2 == 0 }))
 
-	first, ok := q.First(func(n int) bool { return n%2 == 0 })
+	first, ok := From(q).First(func(n int) bool { return n%2 == 0 })
 	assert.True(t, ok)
 	assert.Equal(t, 2, first)
 
-	_, ok = q.First(func(n int) bool { return n > 10 })
+	_, ok = From(q).First(func(n int) bool { return n > 10 })
 	assert.False(t, ok)
+
+	count := From(q).Len()
+	assert.Equal(t, 4, count, "Len should return the number of elements in the query")
 }
 
 func TestQuery_GenericWithStrings(t *testing.T) {
