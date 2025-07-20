@@ -1,6 +1,7 @@
 package linq
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -174,4 +175,20 @@ func Test_ForEach(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 6, sum, "ForEach should apply function to each element")
+}
+
+func Test_trySend_ImmediateCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // upstream cancels the context immediately
+
+	data := []int{1, 2, 3, 4, 5}
+	got, err := Pipe3(
+		FromSlice(ctx, data),
+		Where(func(n int) bool { return n%2 == 1 }),
+		Select(func(n int) int { return n * n }),
+		ToSlice[int](),
+	)
+
+	assert.Error(t, err)
+	assert.Equal(t, 0, len(got), "should return nil slice on immediate cancel")
 }
