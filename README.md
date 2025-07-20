@@ -1,100 +1,123 @@
 # go-collection-boot
 [![codecov](https://codecov.io/gh/SaiNageswarS/go-collection-boot/graph/badge.svg?token=XWI745R6EJ)](https://codecov.io/gh/SaiNageswarS/go-collection-boot)
 
-A zero-dependency, generics-powered collection library for Go.
-
-This package offers utility types and functions to simplify working with collections — including async workflows, sets, and LINQ-style slice operations.
+**go-collection-boot** is a zero‑dependency, generics‑powered collection toolkit for Go 1.24+.
+It brings ergonomic **LINQ‑style streaming**, **async helpers**, and rich **data‑structures**—all without reflection or external packages.
 
 ---
 
-## ✨ Features
+## ✨ Highlights
 
-### ✅ `async` — Type-safe Goroutine Management
+| Area              | Package | What you get                                                                                                          |
+| ----------------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
+| Query & Transform | `linq`  | **High‑throughput streaming pipelines** with context‑aware cancellation (`Where`, `Select`, `Distinct`, `Flatten`, …) |
+| Concurrency       | `async` | Type‑safe goroutine helpers (`Go`, `Await`, `AwaitAll`)                                                               |
+| Collections       | `ds`    | Ergonomic generics for `Set`, `Stack`, `MinHeap`, and more                                                            |
 
-Run goroutines and await results without manual channels.
+---
+
+## 🚀 Quick start
+
+### LINQ – streaming pipelines that auto‑cancel
+
+The `linq` package is built as a **heavy‑duty data‑flow engine**:
+
+* **Streaming everywhere** – every transformer (`Where`, `Select`, `Flatten`, …) runs in its own goroutine, pushing items down an unbuffered/size‑hinted channel.
+* **Compute‑heavy friendly** – downstream stages start before upstream finishes, so CPU‑bound work overlaps naturally.
+* **Early termination** – sinks such as `First`, `Any`, or `Count` call `cancel()` as soon as their answer is known, short‑circuiting the entire chain and saving cycles.
+* **Pure Go contexts** – the shared `context.Context` controls time‑outs, manual cancellation, and propagates errors upstream.
 
 ```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/SaiNageswarS/go-collection-boot/linq"
+)
+
+func main() {
+    ctx := context.Background()
+    nums := []int{1, 2, 3, 4, 5}
+
+    // even squares ➜ slice
+    squares, _ := linq.Pipe3(
+        linq.FromSlice(ctx, nums),                 // Source  (Stream[int])
+        linq.Where(func(n int) bool { return n%2==0 }),
+        linq.Select(func(n int) int { return n*n }),
+        linq.ToSlice[int](),                       // Sink  ([]int, error)
+    )
+    fmt.Println(squares) // [4 16]
+}
+```
+
+#### Handy transformers & sinks
+
+| Transformer       | Purpose                        |
+| ----------------- | ------------------------------ |
+| `Where(pred)`     | keep values matching predicate |
+| `Select(mapFn)`   | map **T → U**                  |
+| `Distinct(keyFn)` | deduplicate by key             |
+| `Flatten[T]()`    | flatten `[][]T → []T`          |
+
+| Sink                      | Returns         |
+| ------------------------- | --------------- |
+| `ToSlice[T]()`            | `([]T, error)`  |
+| `Count[T]()`              | `(int, error)`  |
+| `Any(pred)` / `All(pred)` | `(bool, error)` |
+| `First[T]()`              | `(T, error)`    |
+| `Reverse[T]()`            | `([]T, error)`  |
+
+---
+
+### Async – run tasks & await results 
+
+```go
+package main
+
 import (
     "fmt"
     "github.com/SaiNageswarS/go-collection-boot/async"
 )
 
-func getEmbedding(ctx context.Context, text string) async.Result[[]float32] {
-    return async.Go(func() ([]float32, error) {
-        req := &EmbeddingRequest{
-            Model: "text-embedding-3-small",
-            Input: text,
-        }
-
-        // Assuming `client` is an initialized OpenAI client
-        // resp has Embedding field of type []float32
-        resp, err := client.CreateEmbedding(ctx, req) 
-        if err != nil {
-            return nil, err
-        }
-
-        return resp.Embedding, nil
-    })
-}
-
 func main() {
-    ctx := context.Background()
-    text := "Go is awesome!"
+    fetchA := async.Go(func() (string, error) { return "alpha", nil })
+    fetchB := async.Go(func() (string, error) { return "bravo", nil })
 
-    result, err := async.Await(getEmbedding(ctx, text))
-    if err != nil {
-        fmt.Println("Error:", err)
-        return
-    }
-
-    fmt.Println("Embedding:", result)
+    words, err := async.AwaitAll(fetchA, fetchB)
+    if err != nil { panic(err) }
+    fmt.Println(words) // [alpha bravo]
 }
 ```
 
-### ✅ `set` — Type-safe Set Operations
+---
+
+### Data‑structures – Set, Stack, Min‑heap
+
 ```go
-import (
-    "fmt"
-    "github.com/SaiNageswarS/go-collection-boot/ds"
-)
+set := ds.NewSet[int]()
+set.Add(1, 2, 3, 3)
+fmt.Println(set.ToSlice()) // [1 2 3]
 
-func main() {
-    set := ds.NewSet[int]()
-    set.Add(1, 2, 3)
-    set.Add(3, 4) // Duplicate, will be ignored
+stk := ds.NewStack[string]()
+stk.Push("first"); stk.Push("second")
+val, _ := stk.Pop()
+fmt.Println(val) // "second"
 
-    fmt.Println("Set contains 2:", set.Contains(2)) // true
-    fmt.Println("Set size:", set.Len())            // 4
-
-    // Iterate over elements
-    for _, val := range set.ToSlice() {
-		fmt.Println(val)
-	}
-}
+h := ds.NewMinHeap[int](func(a, b int) bool { return a < b })
+h.Push(5); h.Push(2); h.Push(9)
+fmt.Println(h.Pop()) // 2, true
 ```
 
-### ✅ `linq` — LINQ-style Slice Operations
-```go
-import (
-    "fmt"
-    "github.com/SaiNageswarS/go-collection-boot/linq"
-)
+---
 
-func main() {
-    numbers := []int{1, 2, 3, 4, 5}
+## 🤝 Contributing
 
-    // Filter even numbers and square them
-    result := linq.From(numbers).
-        Where(func(n int) bool { return n%2 == 0 }).
-        Select(func(n int) int { return n * n }).
-        ToSlice()
+Pull requests are welcome! Run tests & `go vet ./...` before submitting.
 
-    fmt.Println("Squared even numbers:", result) // [4, 16]
-}
-``` 
+---
 
-## Installation
+## License
 
-```bash
-go get github.com/SaiNageswarS/go-collection-boot
-```
+Apache‑2.0 © 2025 Sai Nageswar Satchidanand

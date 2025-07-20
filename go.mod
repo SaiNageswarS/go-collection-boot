@@ -1,6 +1,6 @@
 module github.com/SaiNageswarS/go-collection-boot
 
-go 1.23.9
+go 1.24.4
 
 require github.com/stretchr/testify v1.10.0
 
