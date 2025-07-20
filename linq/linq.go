@@ -1,119 +1,356 @@
 package linq
 
-// Query represents a lazy stream of T values.
-type Query[T any] struct {
-	C <-chan T
+import (
+	"context"
+	"errors"
+)
+
+// Stream is a lazy, cancel‑aware sequence of T.
+type Stream[T any] struct {
+	ctx    context.Context    // shared cancellation context
+	cancel context.CancelFunc // cancel function for short-circuit operations like All/Any/First
+	cap    int                // capacity hint for the channel. Advisory only, downstream can shrink it.
+	C      <-chan T           // receive‑only element channel
 }
 
-// From turns a slice into a Query that emits each element.
-func From[T any](items []T) Query[T] {
-	ch := make(chan T)
-	go func() {
-		defer close(ch)
-		for _, v := range items {
-			ch <- v
-		}
-	}()
-	return Query[T]{C: ch}
+func NewStream[T any](ctx context.Context, out <-chan T, cancel context.CancelFunc, capHint int) Stream[T] {
+	return Stream[T]{ctx: ctx, C: out, cancel: cancel, cap: capHint}
 }
 
-// Where filters elements by predicate.
-func (q Query[T]) Where(pred func(T) bool) Query[T] {
-	out := make(chan T)
+// ---------- 1 · Sources ----------
+
+// FromSlice starts a new stream that emits the items one by one.
+func FromSlice[T any](parent context.Context, src []T) Stream[T] {
+	ctx, cancel := context.WithCancel(parent)
+
+	out := make(chan T, max(1, len(src)/2))
 	go func() {
 		defer close(out)
-		for v := range q.C {
-			if pred(v) {
-				out <- v
+		for _, v := range src {
+			select {
+			case <-ctx.Done():
+				return
+			case out <- v:
 			}
 		}
 	}()
-	return Query[T]{C: out}
+
+	return NewStream(ctx, out, cancel, len(src))
 }
 
-// Select maps each element through mapper.
-func (q Query[T]) Select(mapper func(T) T) Query[T] {
-	out := make(chan T)
+func trySend[T any](ctx context.Context, out chan<- T, v T) bool {
+	select {
+	case <-ctx.Done():
+		return false // downstream cancelled
+	case out <- v:
+		return true // delivered
+	}
+}
+
+func tryRecv[T any](ctx context.Context, in <-chan T) (v T, ok bool, err error) {
+	select {
+	case <-ctx.Done():
+		return v, false, ctx.Err()
+	case v, ok = <-in:
+		return v, ok, nil
+	}
+}
+
+// ---------- 2 · Transformers ----------
+
+// Where keeps only the values for which pred == true.
+func whereFn[T any](in Stream[T], pred func(T) bool) Stream[T] {
+	out := make(chan T, max(1, in.cap/2))
+
 	go func() {
 		defer close(out)
-		for v := range q.C {
-			out <- mapper(v)
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil { // context cancelled
+				return
+			}
+			if !ok { // channel closed
+				return
+			}
+
+			if pred(v) {
+				if !trySend(in.ctx, out, v) {
+					return // downstream cancelled
+				}
+			}
 		}
 	}()
-	return Query[T]{C: out}
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
 }
 
-// ToSlice collects all remaining elements into a slice.
-func (q Query[T]) ToSlice() []T {
-	var result []T
-	for v := range q.C {
-		result = append(result, v)
-	}
-	return result
-}
+// Select maps T → U.
+func selectFn[T, U any](in Stream[T], f func(T) U) Stream[U] {
+	out := make(chan U, max(1, in.cap/2))
 
-// Any returns true if predicate holds for any element (consumes the stream).
-func (q Query[T]) Any(pred func(T) bool) bool {
-	for v := range q.C {
-		if pred(v) {
-			return true
+	go func() {
+		defer close(out)
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil { // context cancelled
+				return
+			}
+			if !ok { // channel closed
+				return
+			}
+
+			if !trySend(in.ctx, out, f(v)) {
+				return
+			}
 		}
-	}
-	return false
+	}()
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
 }
 
-// All returns true if predicate holds for every element.
-func (q Query[T]) All(pred func(T) bool) bool {
-	for v := range q.C {
-		if !pred(v) {
-			return false
+func distinctFn[T any, K comparable](in Stream[T], keySelector func(T) K) Stream[T] {
+	out := make(chan T, max(1, in.cap/2))
+	seen := make(map[K]struct{})
+
+	go func() {
+		defer close(out)
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil { // context cancelled
+				return
+			}
+			if !ok { // channel closed
+				return
+			}
+
+			key := keySelector(v)
+			if _, exists := seen[key]; !exists {
+				seen[key] = struct{}{}
+				if !trySend(in.ctx, out, v) {
+					return // downstream cancelled
+				}
+			}
 		}
-	}
-	return true
+	}()
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
 }
 
-// First returns the first element matching pred, or zero+false.
-func (q Query[T]) First(pred func(T) bool) (T, bool) {
-	for v := range q.C {
-		if pred(v) {
-			return v, true
+func flattenFn[T any](in Stream[[]T]) Stream[T] {
+	out := make(chan T, 64) // heuristic buffer size since we don't know the size of the inner slices
+
+	go func() {
+		defer close(out)
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil { // context cancelled
+				return
+			}
+			if !ok { // channel closed
+				return
+			}
+
+			for _, item := range v {
+				if !trySend(in.ctx, out, item) {
+					return // downstream cancelled
+				}
+			}
 		}
+	}()
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
+}
+
+// ---------- 3 · Sinks ----------
+
+// ToSlice collects every remaining element (honours ctx cancellation).
+func toSliceFn[T any](s Stream[T]) ([]T, error) {
+	defer s.cancel()
+
+	out := make([]T, 0, s.cap)
+
+	for {
+		v, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return out, err
+		}
+		if !ok { // channel closed
+			return out, nil
+		}
+		out = append(out, v)
 	}
+}
+
+// ForEach applies fn to every element; stops early if ctx is cancelled.
+// returns placeholder struct to match the signature of a sink.
+func forEachFn[T any](s Stream[T], fn func(T)) (struct{}, error) {
+	defer s.cancel()
+
+	for {
+		v, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return struct{}{}, err
+		}
+		if !ok { // channel closed
+			return struct{}{}, nil
+		}
+		fn(v)
+	}
+}
+
+func countFn[T any](s Stream[T]) (int, error) {
+	defer s.cancel()
+
+	count := 0
+	for {
+		_, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return count, err
+		}
+		if !ok { // channel closed
+			return count, nil
+		}
+		count++
+	}
+}
+
+func firstFn[T any](s Stream[T]) (T, error) {
+	defer s.cancel() // close upstream transformers
+
 	var zero T
-	return zero, false
+	v, ok, err := tryRecv(s.ctx, s.C)
+	if err != nil { // context cancelled
+		return zero, err
+	}
+	if !ok { // channel closed
+		return zero, errors.New("stream is empty, no first element found")
+	}
+
+	return v, nil // return the first element found
 }
 
-// Count returns the number of elements matching pred.
-func (q Query[T]) Count(pred func(T) bool) int {
-	cnt := 0
-	for v := range q.C {
-		if pred(v) {
-			cnt++
+func reverseFn[T any](s Stream[T]) ([]T, error) {
+	defer s.cancel() // close upstream transformers
+
+	out := make([]T, 0, s.cap)
+
+	for {
+		v, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return nil, err
+		}
+		if !ok { // channel closed
+			break
+		}
+		out = append(out, v)
+	}
+
+	// Reverse the slice in place.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+
+	return out, nil
+}
+
+func allFn[T any](s Stream[T], pred func(T) bool) (bool, error) {
+	defer s.cancel() // close upstream transformers
+
+	for {
+		v, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return false, err
+		}
+		if !ok { // channel closed
+			return true, nil
+		}
+		if !pred(v) {
+			return false, nil // found a value that does not match the predicate
 		}
 	}
-	return cnt
 }
 
-// Len returns the total number of elements (identical to Count(func(T) bool { return true })).
-func (q Query[T]) Len() int {
-	cnt := 0
-	for range q.C {
-		cnt++
+func anyFn[T any](s Stream[T], pred func(T) bool) (bool, error) {
+	defer s.cancel() // close upstream transformers
+
+	for {
+		v, ok, err := tryRecv(s.ctx, s.C)
+		if err != nil { // context cancelled
+			return false, err
+		}
+		if !ok { // channel closed
+			return false, nil // no matching value found
+		}
+		if pred(v) {
+			return true, nil // found a value that matches the predicate
+		}
 	}
-	return cnt
 }
 
-// Reverse buffers all elements, then emits them in reverse order.
-func (q Query[T]) Reverse() Query[T] {
-	// buffer everything
-	buf := q.ToSlice()
-	return From(reverseSlice(buf))
-}
+// ---------- 4 · Public "curried" Adapters ----------
 
-// helper to reverse a slice
-func reverseSlice[T any](s []T) []T {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
+func Where[T any](pred func(T) bool) func(Stream[T]) Stream[T] {
+	return func(in Stream[T]) Stream[T] {
+		return whereFn(in, pred)
 	}
-	return s
+}
+
+func Select[T, U any](f func(T) U) func(Stream[T]) Stream[U] {
+	return func(in Stream[T]) Stream[U] {
+		return selectFn(in, f)
+	}
+}
+
+func Distinct[T any, K comparable](keySelector func(T) K) func(Stream[T]) Stream[T] {
+	return func(in Stream[T]) Stream[T] {
+		return distinctFn(in, keySelector)
+	}
+}
+
+func Flatten[T any]() func(Stream[[]T]) Stream[T] {
+	return func(in Stream[[]T]) Stream[T] {
+		return flattenFn(in)
+	}
+}
+
+func ToSlice[T any]() func(Stream[T]) ([]T, error) {
+	return func(s Stream[T]) ([]T, error) {
+		return toSliceFn(s)
+	}
+}
+
+func ForEach[T any](fn func(T)) func(Stream[T]) (struct{}, error) {
+	return func(s Stream[T]) (struct{}, error) {
+		return forEachFn(s, fn)
+	}
+}
+
+func Count[T any]() func(Stream[T]) (int, error) {
+	return func(s Stream[T]) (int, error) {
+		return countFn(s)
+	}
+}
+
+func First[T any]() func(Stream[T]) (T, error) {
+	return func(s Stream[T]) (T, error) {
+		return firstFn(s)
+	}
+}
+
+func Reverse[T any]() func(Stream[T]) ([]T, error) {
+	return func(s Stream[T]) ([]T, error) {
+		return reverseFn(s)
+	}
+}
+
+func All[T any](pred func(T) bool) func(Stream[T]) (bool, error) {
+	return func(s Stream[T]) (bool, error) {
+		return allFn(s, pred)
+	}
+}
+
+func Any[T any](pred func(T) bool) func(Stream[T]) (bool, error) {
+	return func(s Stream[T]) (bool, error) {
+		return anyFn(s, pred)
+	}
 }
