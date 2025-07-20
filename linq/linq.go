@@ -13,12 +13,8 @@ type Stream[T any] struct {
 	C      <-chan T           // receive‑only element channel
 }
 
-func NewStream[T any](ctx context.Context, out <-chan T, cancel context.CancelFunc, capHint ...int) Stream[T] {
-	if len(capHint) > 0 && capHint[0] > 0 {
-		return Stream[T]{ctx: ctx, C: out, cancel: cancel, cap: capHint[0]}
-	}
-
-	return Stream[T]{ctx: ctx, C: out, cancel: cancel, cap: 1}
+func NewStream[T any](ctx context.Context, out <-chan T, cancel context.CancelFunc, capHint int) Stream[T] {
+	return Stream[T]{ctx: ctx, C: out, cancel: cancel, cap: capHint}
 }
 
 // ---------- 1 · Sources ----------
@@ -186,16 +182,17 @@ func toSliceFn[T any](s Stream[T]) ([]T, error) {
 }
 
 // ForEach applies fn to every element; stops early if ctx is cancelled.
-func forEachFn[T any](s Stream[T], fn func(T)) error {
+// returns placeholder struct to match the signature of a sink.
+func forEachFn[T any](s Stream[T], fn func(T)) (struct{}, error) {
 	defer s.cancel()
 
 	for {
 		v, ok, err := tryRecv(s.ctx, s.C)
 		if err != nil { // context cancelled
-			return err
+			return struct{}{}, err
 		}
 		if !ok { // channel closed
-			return nil
+			return struct{}{}, nil
 		}
 		fn(v)
 	}
@@ -322,8 +319,8 @@ func ToSlice[T any]() func(Stream[T]) ([]T, error) {
 	}
 }
 
-func ForEach[T any](fn func(T)) func(Stream[T]) error {
-	return func(s Stream[T]) error {
+func ForEach[T any](fn func(T)) func(Stream[T]) (struct{}, error) {
+	return func(s Stream[T]) (struct{}, error) {
 		return forEachFn(s, fn)
 	}
 }

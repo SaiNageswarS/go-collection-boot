@@ -162,3 +162,16 @@ func Test_Flatten(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, expected, got, "Flatten should concatenate nested slices")
 }
+
+func Test_ForEach(t *testing.T) {
+	ctx := t.Context()
+
+	var sum int
+	_, err := Pipe1(
+		FromSlice(ctx, []int{1, 2, 3}),
+		ForEach(func(n int) { sum += n }),
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 6, sum, "ForEach should apply function to each element")
+}
