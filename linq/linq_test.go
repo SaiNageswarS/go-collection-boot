@@ -177,7 +177,7 @@ func Test_ForEach(t *testing.T) {
 	assert.Equal(t, 6, sum, "ForEach should apply function to each element")
 }
 
-func Test_trySend_ImmediateCancel(t *testing.T) {
+func Test_PipeUpstreamCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // upstream cancels the context immediately
 
@@ -191,4 +191,34 @@ func Test_trySend_ImmediateCancel(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Equal(t, 0, len(got), "should return nil slice on immediate cancel")
+}
+
+func Test_trySend_ImmediateCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel up-front
+
+	ch := make(chan int)       // no receiver; send would block
+	ok := trySend(ctx, ch, 42) // should notice ctx.Done first
+
+	assert.False(t, ok, "trySend must return false when ctx is already cancelled")
+}
+
+func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
+	ctx := t.Context()
+
+	input := [][]int{{1, 2}, {3}} // at least two unique ints so Distinct tries a 2nd send
+
+	// Pipeline:  FromSlice ➜ Where ➜ Select ➜ Distinct ➜ First
+	// `First` cancels after emitting 1; transformers then hit ctx.Done().
+	first, err := Pipe5(
+		FromSlice(ctx, input),
+		Flatten[int](),
+		Where(func(n int) bool { return n > 0 }), // pass all
+		Select(func(n int) int { return n }),     // identity
+		Distinct(func(n int) int { return n }),   // dedupe
+		First[int](),                             // sink – cancels early
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, first)
 }
