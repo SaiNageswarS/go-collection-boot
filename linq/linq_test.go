@@ -211,7 +211,7 @@ func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
 	// Pipeline:  FromSlice ➜ Where ➜ Select ➜ Distinct ➜ First
 	// `First` cancels after emitting 1; transformers then hit ctx.Done().
 	first, err := Pipe5(
-		FromSlice(ctx, input),
+		fromUnbufferedSlice(ctx, input),
 		Flatten[int](),
 		Where(func(n int) bool { return n > 0 }), // pass all
 		Select(func(n int) int { return n }),     // identity
@@ -221,4 +221,20 @@ func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, 1, first)
+}
+
+func fromUnbufferedSlice[T any](parent context.Context, src []T) Stream[T] {
+	ctx, cancel := context.WithCancel(parent)
+	out := make(chan T) // unbuffered
+
+	go func() {
+		defer close(out)
+		for _, v := range src {
+			if !trySend(ctx, out, v) { // stop if downstream cancelled
+				return
+			}
+		}
+	}()
+
+	return NewStream(ctx, out, cancel, 0)
 }
