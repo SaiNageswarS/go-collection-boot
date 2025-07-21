@@ -203,6 +203,23 @@ func Test_trySend_ImmediateCancel(t *testing.T) {
 	assert.False(t, ok, "trySend must return false when ctx is already cancelled")
 }
 
+func Test_SelectPar(t *testing.T) {
+	ctx := t.Context()
+
+	data := []int{1, 2, 3, 4, 5}
+
+	// SelectPar should apply the function in parallel
+	got, err := Pipe2(
+		FromSlice(ctx, data),
+		SelectPar(func(n int) int { return n * n }), // square each in parallel
+		ToSlice[int](),
+	)
+
+	assert.NoError(t, err)
+	assert.Equal(t, []int{1, 4, 9, 16, 25}, got,
+		"SelectPar should apply function to each element in parallel")
+}
+
 func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
 	ctx := t.Context()
 
