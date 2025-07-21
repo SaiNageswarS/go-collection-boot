@@ -3,6 +3,7 @@ package linq
 import (
 	"context"
 	"errors"
+	"sync"
 )
 
 // Stream is a lazy, cancel‑aware sequence of T.
@@ -101,6 +102,97 @@ func selectFn[T, U any](in Stream[T], f func(T) U) Stream[U] {
 
 			if !trySend(in.ctx, out, f(v)) {
 				return
+			}
+		}
+	}()
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
+}
+
+func selectPar[T, U any](in Stream[T], f func(T) U) Stream[U] {
+	// ── channels ───────────────────────────────────────────────
+	out := make(chan U, max(1, in.cap/2)) // final stream
+	resCh := make(chan struct {
+		idx int
+		v   U
+	}, cap(out)) // workers → gatherer
+
+	// ── 1. reader + worker launcher ────────────────────────────
+	go func() {
+		var wg sync.WaitGroup
+		defer func() { // close resCh only after all workers return
+			wg.Wait()
+			close(resCh)
+		}()
+
+		idx := 0
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil || !ok { // cancelled or upstream closed
+				return
+			}
+
+			wg.Add(1)
+			cur := idx // capture
+			idx++
+
+			// one goroutine per element (unchanged)
+			go func(val T, i int) {
+				defer wg.Done()
+				trySend(in.ctx, resCh, struct {
+					idx int
+					v   U
+				}{i, f(val)})
+			}(v, cur)
+		}
+	}()
+
+	// ── 2. gatherer: restore order & stream downstream ─────────
+	go func() {
+		defer close(out)
+
+		next := 0
+		buffer := make(map[int]U)
+
+		for {
+			select {
+			case <-in.ctx.Done():
+				return
+			case r, ok := <-resCh:
+				if !ok { // workers finished → flush any tail in buffer
+					for {
+						v, found := buffer[next]
+						if !found {
+							return
+						}
+						if !trySend(in.ctx, out, v) {
+							return
+						}
+						delete(buffer, next)
+						next++
+					}
+				}
+
+				if r.idx == next {
+					if !trySend(in.ctx, out, r.v) {
+						return
+					}
+					next++
+					// emit consecutive buffered results
+					for {
+						v, found := buffer[next]
+						if !found {
+							break
+						}
+						delete(buffer, next)
+						if !trySend(in.ctx, out, v) {
+							return
+						}
+						next++
+					}
+				} else {
+					buffer[r.idx] = r.v // store out-of-order result
+				}
 			}
 		}
 	}()
@@ -298,6 +390,12 @@ func Where[T any](pred func(T) bool) func(Stream[T]) Stream[T] {
 func Select[T, U any](f func(T) U) func(Stream[T]) Stream[U] {
 	return func(in Stream[T]) Stream[U] {
 		return selectFn(in, f)
+	}
+}
+
+func SelectPar[T, U any](f func(T) U) func(Stream[T]) Stream[U] {
+	return func(in Stream[T]) Stream[U] {
+		return selectPar(in, f)
 	}
 }
 
