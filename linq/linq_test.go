@@ -220,6 +220,76 @@ func Test_SelectPar(t *testing.T) {
 		"SelectPar should apply function to each element in parallel")
 }
 
+func Test_GroupBy(t *testing.T) {
+	ctx := t.Context()
+
+	type sample struct {
+		employeeID string
+		department string
+		name       string
+	}
+	data := []sample{
+		{employeeID: "1", department: "HR", name: "Alice"},
+		{employeeID: "2", department: "IT", name: "Bob"},
+		{employeeID: "3", department: "HR", name: "Charlie"},
+		{employeeID: "4", department: "IT", name: "David"},
+		{employeeID: "5", department: "Finance", name: "Eve"},
+		{employeeID: "6", department: "IT", name: "Frank"},
+	}
+
+	// GroupBy should group numbers by even/odd
+	got, err := Pipe3(
+		FromSlice(ctx, data),
+		GroupBy(func(s sample) string { return s.department }), // group by department
+		Select(func(g []sample) int { return len(g) }),         // count employees in each group
+		ToSlice[int](), // collect results
+	)
+
+	assert.NoError(t, err)
+	expected := []int{2, 3, 1} // HR: 2, IT: 3, Finance: 1
+	// The order of groups is not guaranteed, so we can only check the counts
+	// Check if we have the expected counts
+	assert.Len(t, got, 3, "should have 3 groups")
+	assert.Contains(t, got, expected[0], "should have 2 employees in HR")
+	assert.Contains(t, got, expected[1], "should have 2 employees in IT")
+	assert.Contains(t, got, expected[2], "should have 1 employee in Finance")
+}
+
+func Test_GroupBy_Any(t *testing.T) {
+	ctx := t.Context()
+
+	type sample struct {
+		employeeID string
+		department string
+		name       string
+	}
+	data := []sample{
+		{employeeID: "1", department: "HR", name: "Alice"},
+		{employeeID: "2", department: "IT", name: "Bob"},
+		{employeeID: "3", department: "HR", name: "Charlie"},
+		{employeeID: "4", department: "IT", name: "David"},
+		{employeeID: "5", department: "HR", name: "Eve"},
+		{employeeID: "6", department: "IT", name: "Frank"},
+		{employeeID: "16", department: "Finance", name: "Paul"},
+		{employeeID: "17", department: "Finance", name: "Quinn"},
+		{employeeID: "18", department: "Finance", name: "Rita"},
+		{employeeID: "19", department: "Sales", name: "Sam"},
+	}
+
+	// GroupBy should group by department and check if any group has more than 2 employees
+	// This will end the pipeline early if any group has more than 2 employees
+	got, err := Pipe2(
+		FromSlice(ctx, data),
+		GroupBy(func(s sample) string { return s.department }),
+		Any(func(g []sample) bool {
+			return len(g) > 2 // check if any group has two employees
+		}),
+	)
+
+	assert.NoError(t, err)
+	assert.True(t, got, "should return true since IT, HR and Finance departments have more than 2 employees")
+}
+
 func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
 	ctx := t.Context()
 
