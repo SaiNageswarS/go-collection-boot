@@ -270,15 +270,10 @@ func Test_GroupBy_Any(t *testing.T) {
 		{employeeID: "4", department: "IT", name: "David"},
 		{employeeID: "5", department: "HR", name: "Eve"},
 		{employeeID: "6", department: "IT", name: "Frank"},
-		{employeeID: "7", department: "HR", name: "Grace"},
-		{employeeID: "8", department: "HR", name: "Hank"},
-		{employeeID: "9", department: "HR", name: "Ivy"},
-		{employeeID: "10", department: "HR", name: "Jack"},
-		{employeeID: "11", department: "HR", name: "Kathy"},
-		{employeeID: "12", department: "HR", name: "Leo"},
-		{employeeID: "13", department: "IT", name: "Mia"},
-		{employeeID: "14", department: "IT", name: "Nina"},
-		{employeeID: "15", department: "IT", name: "Oscar"},
+		{employeeID: "16", department: "Finance", name: "Paul"},
+		{employeeID: "17", department: "Finance", name: "Quinn"},
+		{employeeID: "18", department: "Finance", name: "Rita"},
+		{employeeID: "19", department: "Sales", name: "Sam"},
 	}
 
 	// GroupBy should group by department and check if any group has more than 2 employees
@@ -292,7 +287,7 @@ func Test_GroupBy_Any(t *testing.T) {
 	)
 
 	assert.NoError(t, err)
-	assert.True(t, got, "should return true since HR has 9 employees")
+	assert.True(t, got, "should return true since IT, HR and Finance departments have more than 2 employees")
 }
 
 func Test_EarlyCancel_PropagatesThroughTransformers(t *testing.T) {
