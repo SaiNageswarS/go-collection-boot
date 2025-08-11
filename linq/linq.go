@@ -253,6 +253,35 @@ func flattenFn[T any](in Stream[[]T]) Stream[T] {
 	return NewStream(in.ctx, out, in.cancel, in.cap)
 }
 
+func groupByFn[T any, K comparable](in Stream[T], keySelector func(T) K) Stream[[]T] {
+	out := make(chan []T, max(1, in.cap/2))
+	groups := make(map[K][]T)
+
+	go func() {
+		defer close(out)
+		for {
+			v, ok, err := tryRecv(in.ctx, in.C)
+			if err != nil { // context cancelled
+				return
+			}
+			if !ok { // channel closed
+				// Emit all groups before exiting
+				for _, group := range groups {
+					if !trySend(in.ctx, out, group) {
+						return // downstream cancelled
+					}
+				}
+				return
+			}
+
+			key := keySelector(v)
+			groups[key] = append(groups[key], v)
+		}
+	}()
+
+	return NewStream(in.ctx, out, in.cancel, in.cap)
+}
+
 // ---------- 3 · Sinks ----------
 
 // ToSlice collects every remaining element (honours ctx cancellation).
@@ -408,6 +437,12 @@ func Distinct[T any, K comparable](keySelector func(T) K) func(Stream[T]) Stream
 func Flatten[T any]() func(Stream[[]T]) Stream[T] {
 	return func(in Stream[[]T]) Stream[T] {
 		return flattenFn(in)
+	}
+}
+
+func GroupBy[T any, K comparable](keySelector func(T) K) func(Stream[T]) Stream[[]T] {
+	return func(in Stream[T]) Stream[[]T] {
+		return groupByFn(in, keySelector)
 	}
 }
 
