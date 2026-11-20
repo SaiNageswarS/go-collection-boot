@@ -3,6 +3,7 @@ package async
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -82,6 +83,9 @@ func TestGoRecoversPanic(t *testing.T) {
 	}
 	if pe.Value != "boom" || len(pe.Stack) == 0 {
 		t.Fatalf("unexpected panic error: %+v", pe)
+	}
+	if !strings.HasPrefix(err.Error(), "async: panic: boom\n") {
+		t.Fatalf("unexpected message: %q", err.Error())
 	}
 }
 
