@@ -3,6 +3,7 @@ package async
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,35 @@ func TestAwaitAllWithUnbuffered(t *testing.T) {
 	_, err := AwaitAll(chGood, chBad)
 	if err == nil {
 		t.Fatal("expected error but got nil")
+	}
+}
+
+func TestGoRecoversPanic(t *testing.T) {
+	_, err := Await(Go(func() (int, error) { panic("boom") }))
+	var pe *PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("want *PanicError, got %v", err)
+	}
+	if pe.Value != "boom" || len(pe.Stack) == 0 {
+		t.Fatalf("unexpected panic error: %+v", pe)
+	}
+	if !strings.HasPrefix(err.Error(), "async: panic: boom\n") {
+		t.Fatalf("unexpected message: %q", err.Error())
+	}
+}
+
+func TestGoPanicUnwrapsErrors(t *testing.T) {
+	e := errors.New("boom")
+	_, err := Await(Go(func() (int, error) { panic(e) }))
+	if !errors.Is(err, e) {
+		t.Fatalf("want %v in chain, got %v", e, err)
+	}
+}
+
+func TestGoPanicWithNil(t *testing.T) {
+	_, err := Await(Go(func() (int, error) { panic(nil) }))
+	var pe *PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("want *PanicError, got %v", err)
 	}
 }
